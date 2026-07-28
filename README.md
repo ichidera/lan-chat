@@ -84,3 +84,11 @@ other, and you'll see each other in "Nearby devices."
    UI is straightforward given the current architecture.
 
 Happy to build out any of these next — just say which one.
+
+---
+
+## Got feedback? Let's hear it!
+
+Have ideas, bugs to report, or just want to share what you think?
+
+**[Drop your feedback here!](https://ichiderafeedback.lovable.app/)** — quick, easy, and keeps the conversation going.
