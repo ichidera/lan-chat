@@ -17,7 +17,7 @@ import java.io.File
 
 /**
  * Deliberately simple, single-Activity UI: a device list, and a chat screen.
- * All the interesting logic lives in core/*.kt and LanChatForegroundService;
+ * All the interesting logic lives in the core/ package's .kt files and LanChatForegroundService;
  * this file just wires taps to those calls. A production app would likely
  * split this into Fragments + a proper adapter, but this keeps the protocol
  * layer fully decoupled from any UI framework choice.

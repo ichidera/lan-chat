@@ -59,7 +59,7 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
     }
 
     private suspend fun announceLoop() {
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             announceOnce()
             delay(ANNOUNCE_INTERVAL_MS)
         }
@@ -83,7 +83,7 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
 
     private suspend fun listenLoop() {
         val buf = ByteArray(2048)
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             try {
                 val packet = DatagramPacket(buf, buf.size)
                 socket?.receive(packet)
@@ -103,13 +103,13 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
                 )
                 withContext(Dispatchers.Main) { onPeerChanged?.invoke() }
             } catch (_: Exception) {
-                if (!isActive) break
+                if (!currentCoroutineContext().isActive) break
             }
         }
     }
 
     private suspend fun sweepLoop() {
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             delay(SWEEP_INTERVAL_MS)
             val now = System.currentTimeMillis()
             val before = _peers.size

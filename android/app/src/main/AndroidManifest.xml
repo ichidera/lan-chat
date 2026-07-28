@@ -7,6 +7,12 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" /> <!-- required to receive UDP broadcast/mDNS while screen is on -->
 
+    <!-- Required to run LanChatForegroundService via startForeground(). FOREGROUND_SERVICE
+         is required on all API levels >=28; FOREGROUND_SERVICE_DATA_SYNC is additionally
+         required on API 34+ because the service declares foregroundServiceType="dataSync". -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <!-- Installing received APKs (the Xender "app sharing" capability) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
