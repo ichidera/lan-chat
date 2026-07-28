@@ -1,12 +1,31 @@
-node_modules/
-dist/
-*.log
+# Node / desktop artifacts
+desktop/node_modules/
+desktop/dist/
+desktop/build/
+desktop/electron-out/
+*.asar
 
-# Android
+# Python caches and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Android build outputs and local files
 android/.gradle/
 android/app/build/
 android/build/
 android/local.properties
 android/.idea/
 
+# IDE and OS files
+.vscode/
+.idea/
+*.iml
 .DS_Store
+Thumbs.db
+archive.zip
+directory_structure.json
+script_output.txt
+script.py
+write_directory_structure.py
+zip_project.py
