@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Core networking -->
+    <uses-permission android:name="android.permission.INTERNET" /> <!-- needed for raw sockets even though we never leave the LAN -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" /> <!-- required to receive UDP broadcast/mDNS while screen is on -->
+
+    <!-- Installing received APKs (the Xender "app sharing" capability) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- Reading the list of installed apps so the user can pick one to send.
+         QUERY_ALL_PACKAGES is restricted on Play Store for privacy reasons;
+         this app is intended for direct/sideload distribution, which is the
+         normal path for LAN-only tools with no store presence. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission"
+        xmlns:tools="http://schemas.android.com/tools" />
+
+    <application
+        android:allowBackup="false"
+        android:label="LAN Chat"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.LanChat">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Required to hand a received APK's content:// URI to the system installer -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.lanchat.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <service
+            android:name=".core.LanChatForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+    </application>
+</manifest>

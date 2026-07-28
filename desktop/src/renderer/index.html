@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>LAN Chat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div id="self-info">
+        <div id="self-name">—</div>
+        <button id="pair-btn">+ Pair new device</button>
+      </div>
+      <h3>Nearby devices</h3>
+      <ul id="peer-list"></ul>
+    </aside>
+
+    <main id="main">
+      <div id="chat-header">Select a paired device to start chatting</div>
+      <div id="messages"></div>
+      <div id="composer">
+        <input id="msg-input" placeholder="Type a message..." disabled />
+        <button id="send-btn" disabled>Send</button>
+        <button id="file-btn" disabled title="Send file / app">📎</button>
+      </div>
+    </main>
+  </div>
+
+  <div id="pairing-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3>Pair this device</h3>
+      <p>Show this PIN to the other person, or have them enter it on their device:</p>
+      <div id="pairing-pin">------</div>
+      <p class="hint">On the other device: tap "+ Pair new device" too, then enter this same PIN and this device's ID below.</p>
+      <label>Enter their Device ID + PIN to complete pairing from this side:</label>
+      <input id="their-device-json" placeholder="Paste their pairing code here" />
+      <button id="complete-pairing-btn">Complete pairing</button>
+      <button id="close-pairing-btn">Close</button>
+    </div>
+  </div>
+
+  <div id="transfer-toast" class="hidden"></div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
