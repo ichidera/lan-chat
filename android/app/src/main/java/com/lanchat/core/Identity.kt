@@ -15,7 +15,9 @@ data class Identity(
     val name: String,
     val privateKey: ByteArray,
     val publicKey: ByteArray,
-)
+) {
+    val publicKeyHex: String get() = publicKey.joinToString("") { "%02x".format(it) }
+}
 
 object IdentityStore {
     private const val PREFS = "lanchat_identity"

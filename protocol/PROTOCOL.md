@@ -27,42 +27,80 @@ Identity is NOT tied to a phone number, email, or account. It's tied to the devi
 
 ## 3. Discovery (Presence)
 
-Every device broadcasts a UDP packet every 3 seconds to `255.255.255.255:47110`:
+Every device broadcasts a UDP packet every 3 seconds, using **three redundant
+delivery layers** so it's reachable regardless of how a given machine's
+networking is set up:
+
+1. Global broadcast to `255.255.255.255:47110`.
+2. The subnet broadcast address computed per active network interface (e.g.
+   `192.168.1.255` for a `192.168.1.0/24` Wi-Fi adapter) — this is the layer
+   that matters most on machines with multiple adapters (Wi-Fi + Ethernet, a
+   VPN adapter, Hyper-V/VMware virtual switches), where a single global
+   broadcast can go out the wrong interface entirely.
+3. Multicast to `239.255.255.250:47110` as a fallback for networks where
+   broadcast is filtered but multicast isn't.
+
+Losing any one layer still leaves the others — this is intentionally
+redundant rather than betting on "the one correct" method.
+
+Packet shape:
 
 ```json
 {
   "type": "presence",
   "deviceId": "b3f1...",
   "name": "Ada's Pixel",
-  "kind": "android" ,        // "android" | "desktop"
+  "kind": "android",         // "android" | "desktop"
   "chatPort": 47111,
   "transferPort": 47112,
+  "publicKeyRaw": "9f2a...", // hex-encoded X25519 public key — see §4, this is what makes pairing PIN-only
   "version": 1,
   "ts": 1732550000
 }
 ```
 
+Public keys are not secret, so broadcasting one in every presence packet is
+safe — it's what lets pairing (§4) skip exchanging anything but a PIN.
+
 Receivers keep a live table of peers, keyed by `deviceId`, and expire any peer not
-heard from in 10 seconds (handles someone walking out of Wi-Fi range or closing the app).
+heard from in 12 seconds (handles someone walking out of Wi-Fi range or closing the app;
+12s = 4x the announce interval, so one dropped packet doesn't flap a peer in and out).
 
 Devices bind a UDP listener on `0.0.0.0:47110` with `SO_REUSEADDR`/`SO_BROADCAST` so
-multiple instances on one dev machine can still be tested locally.
+multiple instances on one dev machine can still be tested locally, and join the
+multicast group on the same socket to receive layer 3 announces too.
 
 ## 4. Pairing (trust, not accounts)
 
-Before two devices can exchange chat messages or files, they must pair once:
+Before two devices can exchange chat messages or files, they must pair once.
+Because public keys already travel automatically in every presence packet
+(§3), pairing is reduced to the one thing that genuinely needs a human:
+**agreeing on the same 6-digit PIN.**
 
-1. Device A shows a **6-digit PIN** (or QR code encoding the same payload) generated
-   locally: `{deviceId, pubKey, pin}`.
-2. Device B scans/enters it. Both sides run a Noise "NN"-style handshake seeded with
-   the PIN as an out-of-band authenticator (SPAKE2-style: prevents a third LAN device
-   from silently MITM'ing the handshake).
-3. On success, each side stores the other's `deviceId` + `pubKey` in a local
-   "trusted peers" store. All future messages from that `deviceId` are authenticated
-   against that stored public key — no PIN needed again.
+1. Person A clicks Bob's entry in "Nearby devices." Since they're not paired
+   yet, this opens a pairing dialog showing a freshly generated PIN.
+2. Person A tells Bob that PIN (out loud, over text, however — this is the
+   one out-of-band step).
+3. Bob clicks Alice's entry on his device. His pairing dialog also generates
+   its own PIN by default, but he overwrites it with the PIN Alice gave him.
+4. Both sides derive a session key from `(their own private key, the peer's
+   already-known public key, the shared PIN)` — see `deriveSessionKey` in
+   `crypto.js`/`CryptoUtil.kt`. This is a pure local computation; nothing is
+   sent back and forth to "confirm" a match. If both people used the same
+   PIN, every future encrypted message between them decrypts correctly. If
+   they used different PINs, decryption fails loudly (AEAD authentication
+   failure) rather than silently producing garbage — so a mismatched PIN is
+   very obvious the first time you try to chat, not a subtle bug.
+5. Each side stores the peer's `deviceId` + `publicKeyRaw` + derived session
+   key in a local "trusted peers" store. No PIN needed again after this.
 
-Untrusted peers are visible in the "Nearby Devices" list (so you can see who's
-around) but chat/transfer actions are disabled until paired.
+Untrusted peers are visible in "Nearby Devices" (so you can see who's
+around) but clicking one opens the pairing dialog instead of a chat, until
+paired.
+
+**Threat model note:** this is a PIN-salted ECDH, not a full PAKE (e.g.
+SPAKE2). It stops a passive network observer who didn't see the PIN. It's
+intentionally simple for a v1 LAN app.
 
 ## 5. Transport Security
 

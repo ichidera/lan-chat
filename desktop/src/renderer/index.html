@@ -10,14 +10,14 @@
     <aside id="sidebar">
       <div id="self-info">
         <div id="self-name">—</div>
-        <button id="pair-btn">+ Pair new device</button>
       </div>
       <h3>Nearby devices</h3>
       <ul id="peer-list"></ul>
+      <p id="empty-hint" class="hint hidden">No devices found yet. Make sure the other device is on the same Wi-Fi/LAN and its app is open — this can take a few seconds.</p>
     </aside>
 
     <main id="main">
-      <div id="chat-header">Select a paired device to start chatting</div>
+      <div id="chat-header">Click a device on the left to chat, or to pair with it</div>
       <div id="messages"></div>
       <div id="composer">
         <input id="msg-input" placeholder="Type a message..." disabled />
@@ -29,14 +29,19 @@
 
   <div id="pairing-modal" class="modal hidden">
     <div class="modal-box">
-      <h3>Pair this device</h3>
-      <p>Show this PIN to the other person, or have them enter it on their device:</p>
+      <h3 id="pairing-title">Pair with device</h3>
+      <p class="hint">Pairing needs one thing: <strong>the same 6-digit PIN entered on both devices.</strong> Everything else (device identity, keys) is already exchanged automatically.</p>
+
+      <p>Option A — you tell them a PIN:</p>
       <div id="pairing-pin">------</div>
-      <p class="hint">On the other device: tap "+ Pair new device" too, then enter this same PIN and this device's ID below.</p>
-      <label>Enter their Device ID + PIN to complete pairing from this side:</label>
-      <input id="their-device-json" placeholder="Paste their pairing code here" />
-      <button id="complete-pairing-btn">Complete pairing</button>
-      <button id="close-pairing-btn">Close</button>
+      <p class="hint">Say/send this number to the person on the other device, then have them type it into their own pairing dialog for you.</p>
+
+      <p>Option B — they told you a PIN:</p>
+      <input id="pin-input" placeholder="Enter the 6-digit PIN" maxlength="6" inputmode="numeric" />
+
+      <button id="complete-pairing-btn">Pair using this PIN</button>
+      <button id="close-pairing-btn">Cancel</button>
+      <p id="pairing-error" class="error hidden"></p>
     </div>
   </div>
 

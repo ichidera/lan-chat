@@ -8,7 +8,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Show this PIN to the other person, or paste this device's full pairing code to them:" />
+        android:text="Option A — you tell them a PIN:" />
 
     <TextView
         android:id="@+id/pairingPin"
@@ -23,12 +23,14 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="Paste the other device's pairing code here to complete pairing from this side:" />
+        android:text="Option B — they told you a PIN:" />
 
     <EditText
         android:id="@+id/theirCodeInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Paste pairing code" />
+        android:inputType="number"
+        android:maxLength="6"
+        android:hint="Enter the 6-digit PIN" />
 
 </LinearLayout>

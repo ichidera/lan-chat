@@ -6,8 +6,8 @@ contextBridge.exposeInMainWorld('lanchat', {
   listPeers: () => ipcRenderer.invoke('peers:list'),
   listTrusted: () => ipcRenderer.invoke('trust:list'),
 
-  startPairing: () => ipcRenderer.invoke('pairing:start'),
-  completePairing: (offer) => ipcRenderer.invoke('pairing:complete', offer),
+  generatePairingPin: () => ipcRenderer.invoke('pairing:generatePin'),
+  pairWithPeer: (peer, pin) => ipcRenderer.invoke('pairing:pair', { peer, pin }),
 
   sendChat: (peer, body) => ipcRenderer.invoke('chat:send', { peer, body }),
   onChatMessage: (cb) => ipcRenderer.on('chat:message', (_e, data) => cb(data)),

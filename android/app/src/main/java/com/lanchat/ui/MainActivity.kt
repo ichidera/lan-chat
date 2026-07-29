@@ -18,14 +18,18 @@ import java.io.File
 /**
  * Deliberately simple, single-Activity UI: a device list, and a chat screen.
  * All the interesting logic lives in the core/ package's .kt files and LanChatForegroundService;
- * this file just wires taps to those calls. A production app would likely
- * split this into Fragments + a proper adapter, but this keeps the protocol
- * layer fully decoupled from any UI framework choice.
+ * this file just wires taps to those calls.
+ *
+ * Tapping a device in the list is the single entry point (mirrors the
+ * desktop renderer): if it's not paired yet, this opens the pairing dialog
+ * for that specific device; if it is paired, tapping toggles its chat screen
+ * open/closed.
  */
 class MainActivity : AppCompatActivity() {
 
     private var service: LanChatForegroundService? = null
     private var activePeer: PeerInfo? = null
+    private var peersSnapshot: List<PeerInfo> = emptyList()
 
     private lateinit var peerListView: ListView
     private lateinit var chatContainer: LinearLayout
@@ -46,7 +50,7 @@ class MainActivity : AppCompatActivity() {
                     messagesAdapter.notifyDataSetChanged()
                 }
             }
-            service?.transferServer?.onOffer = { transferId, from, files ->
+            service?.transferServer?.onOffer = { transferId, _, files ->
                 runOnUiThread {
                     AlertDialog.Builder(this@MainActivity)
                         .setTitle("Incoming files")
@@ -59,7 +63,6 @@ class MainActivity : AppCompatActivity() {
             service?.transferServer?.onComplete = { _, status, paths ->
                 runOnUiThread {
                     Toast.makeText(this@MainActivity, "Received ($status): $paths", Toast.LENGTH_LONG).show()
-                    // Auto-offer install if any received file looks like an APK.
                     paths.firstOrNull { it.endsWith(".apk") }?.let { ApkShare.installReceivedApk(this@MainActivity, File(it)) }
                 }
             }
@@ -81,7 +84,6 @@ class MainActivity : AppCompatActivity() {
         messagesAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, messages)
         messagesView.adapter = messagesAdapter
 
-        findViewById<Button>(R.id.pairButton).setOnClickListener { showPairingDialog() }
         findViewById<Button>(R.id.backButton).setOnClickListener { showPeerList() }
         findViewById<Button>(R.id.sendButton).setOnClickListener { sendMessage() }
         findViewById<Button>(R.id.attachButton).setOnClickListener { showAttachDialog() }
@@ -92,21 +94,36 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshPeerList() {
         val peers = service?.discovery?.peers?.values?.toList().orEmpty()
+        peersSnapshot = peers
         val trustStore = TrustStore(this)
         val labels = peers.map { p ->
             val kind = if (p.kind == "desktop") "\uD83D\uDCBB" else "\uD83D\uDCF1"
-            "$kind ${p.name}" + if (!trustStore.isPaired(p.deviceId)) " (not paired)" else ""
+            val trusted = trustStore.isPaired(p.deviceId)
+            "$kind ${p.name}" + when {
+                !trusted -> " — tap to pair"
+                activePeer?.deviceId == p.deviceId -> " (open)"
+                else -> ""
+            }
         }
         runOnUiThread {
             peerListView.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, labels)
             peerListView.setOnItemClickListener { _, _, position, _ ->
                 val peer = peers[position]
-                if (!trustStore.isPaired(peer.deviceId)) {
-                    Toast.makeText(this, "Pair with this device first", Toast.LENGTH_SHORT).show()
-                } else {
-                    openChat(peer)
-                }
+                togglePeer(peer, trustStore)
             }
+        }
+    }
+
+    /** Single entry point for tapping a device: pair if needed, otherwise toggle its chat open/closed. */
+    private fun togglePeer(peer: PeerInfo, trustStore: TrustStore) {
+        if (!trustStore.isPaired(peer.deviceId)) {
+            showPairingDialog(peer)
+            return
+        }
+        if (activePeer?.deviceId == peer.deviceId) {
+            showPeerList() // tapping the already-open conversation again closes it
+        } else {
+            openChat(peer)
         }
     }
 
@@ -120,6 +137,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPeerList() {
+        activePeer = null
         peerContainer.visibility = android.view.View.VISIBLE
         chatContainer.visibility = android.view.View.GONE
         refreshPeerList()
@@ -140,11 +158,9 @@ class MainActivity : AppCompatActivity() {
     /** Lets the user pick: send an installed app (the "Xender" capability), or a generic file. */
     private fun showAttachDialog() {
         val peer = activePeer ?: return
-        val apps = ApkShare.listUserInstalledApps(this)
-        val options = arrayOf("Send an installed app") + apps.take(0).map { it.label } // app list shown in sub-dialog below
         AlertDialog.Builder(this)
             .setTitle("Send to ${peer.name}")
-            .setItems(arrayOf("Send an installed app…")) { _, _ -> showAppPickerDialog(peer, apps) }
+            .setItems(arrayOf("Send an installed app…")) { _, _ -> showAppPickerDialog(peer, ApkShare.listUserInstalledApps(this)) }
             .show()
     }
 
@@ -164,27 +180,42 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showPairingDialog() {
+    /**
+     * Pairing dialog, tied to one specific peer. Only a PIN needs to be
+     * agreed on — see Pairing.kt / PROTOCOL.md §4 for why nothing else does.
+     */
+    private fun showPairingDialog(peer: PeerInfo) {
         val identity = IdentityStore.loadOrCreate(this)
-        val offer = Pairing.startPairing(identity)
+        val generatedPin = Pairing.generatePin()
+
         val view = layoutInflater.inflate(R.layout.dialog_pairing, null)
-        view.findViewById<TextView>(R.id.pairingPin).text = offer.pin
-        val theirCodeInput = view.findViewById<EditText>(R.id.theirCodeInput)
+        view.findViewById<TextView>(R.id.pairingPin).text = generatedPin
+        val pinInput = view.findViewById<EditText>(R.id.theirCodeInput).apply {
+            hint = "Or enter the PIN they gave you"
+        }
 
         AlertDialog.Builder(this)
-            .setTitle("Pair this device")
+            .setTitle("Pair with ${peer.name}")
+            .setMessage("Tell them this PIN, or enter the one they told you, then tap Pair.")
             .setView(view)
-            .setPositiveButton("Complete pairing") { _, _ ->
+            .setPositiveButton("Pair") { _, _ ->
+                val typedPin = pinInput.text.toString().trim()
+                val pin = if (typedPin.isNotEmpty()) typedPin else generatedPin
+                // Re-read the live peer so we have its freshest publicKeyRaw.
+                val livePeer = peersSnapshot.find { it.deviceId == peer.deviceId } ?: peer
                 try {
-                    val theirOffer = Pairing.Offer.fromJson(theirCodeInput.text.toString())
-                    Pairing.completePairing(theirOffer, identity, TrustStore(this))
-                    Toast.makeText(this, "Paired with ${theirOffer.name}", Toast.LENGTH_SHORT).show()
-                    refreshPeerList()
+                    Pairing.pairWithPeer(identity, livePeer, pin, TrustStore(this))
+                    Toast.makeText(this, "Paired with ${livePeer.name}", Toast.LENGTH_SHORT).show()
+                    openChat(livePeer)
                 } catch (e: Exception) {
-                    Toast.makeText(this, "Could not parse pairing code: ${e.message}", Toast.LENGTH_LONG).show()
+                    AlertDialog.Builder(this)
+                        .setTitle("Couldn't pair")
+                        .setMessage(e.message)
+                        .setPositiveButton("OK", null)
+                        .show()
                 }
             }
-            .setNegativeButton("Close", null)
+            .setNegativeButton("Cancel", null)
             .show()
     }
 

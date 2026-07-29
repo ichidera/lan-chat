@@ -12,16 +12,18 @@ const os = require('os');
 
 const { Discovery } = require('./discovery');
 const { TrustStore } = require('./trustStore');
-const { startPairing, deriveMatchingKey } = require('./pairing');
+const { generatePin, pairWithPeer } = require('./pairing');
 const cryptoCore = require('./crypto');
 const { ChatNode } = require('./chat');
 const { TransferServer, TransferClient } = require('./transfer');
 
 function makeSelf(name, basePort) {
+  const keyPair = cryptoCore.generateKeyPair();
   return {
     deviceId: crypto.randomUUID(),
     name,
-    keyPair: cryptoCore.generateKeyPair(),
+    keyPair,
+    publicKeyRaw: cryptoCore.exportPublicKeyRaw(keyPair.publicKey).toString('hex'),
     chatPort: basePort,
     transferPort: basePort + 10,
   };
@@ -39,21 +41,23 @@ async function main() {
   const aliceTrust = new TrustStore(path.join(tmpDir, 'alice-trust.json'));
   const bobTrust = new TrustStore(path.join(tmpDir, 'bob-trust.json'));
 
-  // 1) Pairing (simulating PIN exchange happening out of band, e.g. user reads screen)
-  const offerFromAlice = startPairing(alice);
-  const bobSessionKey = deriveMatchingKey(bob, offerFromAlice.publicKeyRaw, offerFromAlice.pin);
-  bobTrust.addPaired(alice.deviceId, alice.name, Buffer.from(offerFromAlice.publicKeyRaw, 'hex'), bobSessionKey);
+  // 1) Pairing — this is what the real UI does now: a human agrees on one PIN
+  // out of band, and BOTH sides already know each other's public key because
+  // it travels in every presence broadcast (see discovery.js). No JSON blobs
+  // change hands — that was the bug in the old flow.
+  const sharedPin = generatePin();
+  const alicePeerView = { deviceId: bob.deviceId, name: bob.name, ip: '127.0.0.1', publicKeyRaw: bob.publicKeyRaw, chatPort: bob.chatPort, transferPort: bob.transferPort };
+  const bobPeerView = { deviceId: alice.deviceId, name: alice.name, ip: '127.0.0.1', publicKeyRaw: alice.publicKeyRaw, chatPort: alice.chatPort, transferPort: alice.transferPort };
 
-  const bobPublicKeyRaw = cryptoCore.exportPublicKeyRaw(bob.keyPair.publicKey).toString('hex');
-  const aliceSessionKey = deriveMatchingKey(alice, bobPublicKeyRaw, offerFromAlice.pin);
-  aliceTrust.addPaired(bob.deviceId, bob.name, Buffer.from(bobPublicKeyRaw, 'hex'), aliceSessionKey);
+  const aliceSessionKey = pairWithPeer(alice, alicePeerView, sharedPin, aliceTrust);
+  const bobSessionKey = pairWithPeer(bob, bobPeerView, sharedPin, bobTrust);
 
   console.assert(aliceSessionKey.equals(bobSessionKey), 'FAIL: session keys must match');
-  console.log('[ok] pairing: both sides derived identical session key');
+  console.log('[ok] pairing: both sides derived identical session key from a shared PIN alone');
 
   // 2) Discovery (real UDP broadcast on loopback-capable network in this sandbox)
-  const aliceDisc = new Discovery({ deviceId: alice.deviceId, name: alice.name, chatPort: alice.chatPort, transferPort: alice.transferPort });
-  const bobDisc = new Discovery({ deviceId: bob.deviceId, name: bob.name, chatPort: bob.chatPort, transferPort: bob.transferPort });
+  const aliceDisc = new Discovery({ deviceId: alice.deviceId, name: alice.name, chatPort: alice.chatPort, transferPort: alice.transferPort, publicKeyRaw: alice.publicKeyRaw });
+  const bobDisc = new Discovery({ deviceId: bob.deviceId, name: bob.name, chatPort: bob.chatPort, transferPort: bob.transferPort, publicKeyRaw: bob.publicKeyRaw });
   aliceDisc.start();
   bobDisc.start();
   await sleep(500);

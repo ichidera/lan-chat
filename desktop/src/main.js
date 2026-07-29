@@ -7,7 +7,7 @@ const os = require('os');
 
 const { Discovery } = require('./core/discovery');
 const { TrustStore } = require('./core/trustStore');
-const { startPairing, deriveMatchingKey } = require('./core/pairing');
+const { generatePin, pairWithPeer } = require('./core/pairing');
 const cryptoCore = require('./core/crypto');
 const { ChatNode } = require('./core/chat');
 const { TransferServer, TransferClient } = require('./core/transfer');
@@ -55,13 +55,16 @@ function createWindow() {
 
 app.whenReady().then(() => {
   const identity = loadOrCreateIdentity();
-  self = { ...identity, chatPort: 47111, transferPort: 47112 };
+  const publicKeyRaw = cryptoCore.exportPublicKeyRaw(identity.keyPair.publicKey).toString('hex');
+  self = { ...identity, chatPort: 47111, transferPort: 47112, publicKeyRaw };
 
   trustStore = new TrustStore(path.join(APP_DIR, 'trust.json'));
 
   discovery = new Discovery(self);
-  discovery.on('peer:new', (peer) => mainWindow.webContents.send('peers:update', discovery.list()));
+  discovery.on('peer:new', () => mainWindow.webContents.send('peers:update', discovery.list()));
+  discovery.on('peer:update', () => mainWindow.webContents.send('peers:update', discovery.list()));
   discovery.on('peer:gone', () => mainWindow.webContents.send('peers:update', discovery.list()));
+  discovery.on('error', (err) => console.warn('[discovery]', err.message));
   discovery.start();
 
   chat = new ChatNode(self, trustStore);
@@ -84,10 +87,9 @@ ipcMain.handle('self:get', () => ({ deviceId: self.deviceId, name: self.name }))
 ipcMain.handle('peers:list', () => discovery.list());
 ipcMain.handle('trust:list', () => trustStore.list());
 
-ipcMain.handle('pairing:start', () => startPairing(self));
-ipcMain.handle('pairing:complete', (_e, { deviceId, name, publicKeyRaw, pin }) => {
-  const sessionKey = deriveMatchingKey(self, publicKeyRaw, pin);
-  trustStore.addPaired(deviceId, name, Buffer.from(publicKeyRaw, 'hex'), sessionKey);
+ipcMain.handle('pairing:generatePin', () => generatePin());
+ipcMain.handle('pairing:pair', (_e, { peer, pin }) => {
+  pairWithPeer(self, peer, pin, trustStore); // throws with a friendly message on bad PIN / missing pubkey — renderer shows it
   return true;
 });
 
