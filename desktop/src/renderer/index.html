@@ -10,14 +10,24 @@
     <aside id="sidebar">
       <div id="self-info">
         <div id="self-name">—</div>
-        <button id="pair-btn">+ Pair new device</button>
+        <div id="self-ip" class="hint"></div>
       </div>
       <h3>Nearby devices</h3>
       <ul id="peer-list"></ul>
+      <p id="empty-hint" class="hint hidden">No devices found yet. Make sure the other device is on the same Wi-Fi/LAN and its app is open — this can take a few seconds.</p>
+
+      <div id="manual-connect">
+        <h3>Can't find a device?</h3>
+        <div class="row">
+          <input id="manual-ip-input" placeholder="Their IP address" />
+          <button id="manual-ip-btn">Try</button>
+        </div>
+        <p class="hint">Ask them for their IP (shown above their own device list) and enter it here — this connects directly, bypassing network discovery.</p>
+      </div>
     </aside>
 
     <main id="main">
-      <div id="chat-header">Select a paired device to start chatting</div>
+      <div id="chat-header">Click a device on the left to connect, or to chat</div>
       <div id="messages"></div>
       <div id="composer">
         <input id="msg-input" placeholder="Type a message..." disabled />
@@ -27,16 +37,28 @@
     </main>
   </div>
 
-  <div id="pairing-modal" class="modal hidden">
+  <!-- Shown on the initiating side while waiting for the other device to accept -->
+  <div id="waiting-modal" class="modal hidden">
     <div class="modal-box">
-      <h3>Pair this device</h3>
-      <p>Show this PIN to the other person, or have them enter it on their device:</p>
-      <div id="pairing-pin">------</div>
-      <p class="hint">On the other device: tap "+ Pair new device" too, then enter this same PIN and this device's ID below.</p>
-      <label>Enter their Device ID + PIN to complete pairing from this side:</label>
-      <input id="their-device-json" placeholder="Paste their pairing code here" />
-      <button id="complete-pairing-btn">Complete pairing</button>
-      <button id="close-pairing-btn">Close</button>
+      <h3 id="waiting-title">Connecting…</h3>
+      <p class="hint">Waiting for them to accept on their device.</p>
+      <p class="hint">If both screens show the same code below, it's genuinely them:</p>
+      <div id="waiting-code">------</div>
+      <button id="cancel-waiting-btn">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Shown on the receiving side when someone else initiates a connect -->
+  <div id="incoming-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 id="incoming-title">Connection request</h3>
+      <p id="incoming-body" class="hint"></p>
+      <p class="hint">If this code matches what's on their screen, it's genuinely them:</p>
+      <div id="incoming-code">------</div>
+      <div class="row">
+        <button id="incoming-accept-btn">Accept</button>
+        <button id="incoming-decline-btn">Decline</button>
+      </div>
     </div>
   </div>
 

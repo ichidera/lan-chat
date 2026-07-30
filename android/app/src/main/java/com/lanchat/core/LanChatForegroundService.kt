@@ -22,6 +22,8 @@ class LanChatForegroundService : Service() {
     lateinit var chatNode: ChatNode
     lateinit var transferServer: TransferServer
     lateinit var transferClient: TransferClient
+    lateinit var connectServer: ConnectServer
+    lateinit var connectClient: ConnectClient
 
     private val binder = LocalBinder()
     inner class LocalBinder : Binder() { fun getService(): LanChatForegroundService = this@LanChatForegroundService }
@@ -31,12 +33,14 @@ class LanChatForegroundService : Service() {
         super.onCreate()
         identity = IdentityStore.loadOrCreate(this)
         trustStore = TrustStore(this)
-        val self = SelfInfo(identity.deviceId, identity.name, chatPort = 47111, transferPort = 47112)
+        val self = SelfInfo(identity.deviceId, identity.name, chatPort = 47111, transferPort = 47112, connectPort = 47120, publicKeyRaw = identity.publicKeyHex)
 
         discovery = Discovery(this, self).also { it.start() }
         chatNode = ChatNode(self, trustStore).also { it.start() }
         transferServer = TransferServer(self, trustStore, File(filesDir, "received")).also { it.start() }
         transferClient = TransferClient(self, trustStore)
+        connectServer = ConnectServer(identity, trustStore, self.connectPort).also { it.start() }
+        connectClient = ConnectClient(identity, trustStore)
 
         startForeground(NOTIFICATION_ID, buildNotification())
     }
@@ -61,6 +65,7 @@ class LanChatForegroundService : Service() {
         discovery.stop()
         chatNode.stop()
         transferServer.stop()
+        connectServer.stop()
         super.onDestroy()
     }
 

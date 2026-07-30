@@ -10,7 +10,8 @@ All ports below are defaults and should be user-configurable (in case of conflic
 
 | Purpose            | Transport | Port  |
 |---------------------|-----------|-------|
-| Presence/discovery  | UDP broadcast | 47110 |
+| Presence/discovery  | UDP broadcast + multicast | 47110 |
+| Connect (pairing request/accept) | TCP | 47120 |
 | Chat messages       | TCP (JSON lines) | 47111 |
 | File/app transfer   | TCP (binary framed) | 47112 (+N for parallel streams) |
 
@@ -27,49 +28,109 @@ Identity is NOT tied to a phone number, email, or account. It's tied to the devi
 
 ## 3. Discovery (Presence)
 
-Every device broadcasts a UDP packet every 3 seconds to `255.255.255.255:47110`:
+Every device broadcasts a UDP packet every 3 seconds, using **four layers**
+so it's reachable regardless of how a given machine's networking is set up:
+
+1. Global broadcast to `255.255.255.255:47110`.
+2. The subnet broadcast address computed per active network interface (e.g.
+   `192.168.1.255` for a `192.168.1.0/24` Wi-Fi adapter) — this is the layer
+   that matters most on machines with multiple adapters (Wi-Fi + Ethernet, a
+   VPN adapter, Hyper-V/VMware virtual switches), where a single global
+   broadcast can go out the wrong interface entirely.
+3. Multicast to `239.255.255.250:47110` as a fallback for networks where
+   broadcast is filtered but multicast isn't.
+4. **Reply-on-new-peer**: the moment a device receives a presence packet from
+   a `deviceId` it hasn't seen before, it immediately unicasts its own
+   presence straight back to the sender's address — instead of waiting for
+   its own next 3-second broadcast cycle. This fixes the common asymmetric
+   case where broadcast reaches A→B fine but B→A is lossy or blocked for
+   some network-specific reason: B just heard from A directly, so B can
+   reply to that exact address without needing broadcast to work in that
+   direction too.
+
+There's also a **manual fallback**, "Connect by IP": a person can type
+another device's IP address directly, which sends one unicast presence
+packet straight to it (see `Discovery.probe()`), bypassing broadcast and
+multicast entirely. Combined with layer 4 above, one working direction of
+reachability is enough for both devices to discover each other.
+
+Losing any one layer still leaves the others — this is intentionally
+redundant rather than betting on "the one correct" method.
+
+Packet shape:
 
 ```json
 {
   "type": "presence",
   "deviceId": "b3f1...",
   "name": "Ada's Pixel",
-  "kind": "android" ,        // "android" | "desktop"
+  "kind": "android",         // "android" | "desktop"
   "chatPort": 47111,
   "transferPort": 47112,
+  "connectPort": 47120,
+  "publicKeyRaw": "9f2a...", // hex-encoded X25519 public key — see §4, this is what makes pairing a single tap+accept
   "version": 1,
   "ts": 1732550000
 }
 ```
 
+Public keys are not secret, so broadcasting one in every presence packet is
+safe — it's what lets the Connect flow (§4) skip exchanging anything at all
+beyond a visible "does this code match?" check.
+
 Receivers keep a live table of peers, keyed by `deviceId`, and expire any peer not
-heard from in 10 seconds (handles someone walking out of Wi-Fi range or closing the app).
+heard from in 12 seconds (handles someone walking out of Wi-Fi range or closing the app;
+12s = 4x the announce interval, so one dropped packet doesn't flap a peer in and out).
 
 Devices bind a UDP listener on `0.0.0.0:47110` with `SO_REUSEADDR`/`SO_BROADCAST` so
-multiple instances on one dev machine can still be tested locally.
+multiple instances on one dev machine can still be tested locally, and join the
+multicast group on the same socket to receive layer 3 announces too.
 
-## 4. Pairing (trust, not accounts)
+## 4. Connect (trust, not accounts)
 
-Before two devices can exchange chat messages or files, they must pair once:
+Before two devices can exchange chat messages or files, they must connect
+once — a Bluetooth-style request/accept flow, not a PIN to type in:
 
-1. Device A shows a **6-digit PIN** (or QR code encoding the same payload) generated
-   locally: `{deviceId, pubKey, pin}`.
-2. Device B scans/enters it. Both sides run a Noise "NN"-style handshake seeded with
-   the PIN as an out-of-band authenticator (SPAKE2-style: prevents a third LAN device
-   from silently MITM'ing the handshake).
-3. On success, each side stores the other's `deviceId` + `pubKey` in a local
-   "trusted peers" store. All future messages from that `deviceId` are authenticated
-   against that stored public key — no PIN needed again.
+1. Person A taps Bob's entry in "Nearby devices," confirms "Connect to Bob's
+   Phone?", which opens a TCP connection to Bob on port 47120 and sends a
+   `connect_request` containing Alice's identity + public key.
+2. Alice's screen immediately shows "Waiting for Bob to accept…" along with
+   a 6-digit verification code computed from *both* public keys (which she
+   already has: her own, plus Bob's from his presence broadcast).
+3. Bob's device (always listening via `ConnectServer`) receives the request
+   and shows a popup: "Ada's Laptop wants to connect. Code: 483920 — does
+   this match their screen? [Accept] [Decline]" — Bob computes the exact
+   same code independently, since he now has both public keys too.
+4. If Bob accepts, both sides derive a session key from pure ECDH (their own
+   private key + the other's public key — see `deriveConnectSessionKey` in
+   `crypto.js`/`CryptoUtil.kt`) and store the pairing. Alice's "waiting"
+   screen resolves and opens the chat automatically.
+5. If Bob declines, or doesn't respond within 20 seconds, Alice sees that
+   instead and nothing is stored on either side.
 
-Untrusted peers are visible in the "Nearby Devices" list (so you can see who's
-around) but chat/transfer actions are disabled until paired.
+Untrusted peers are visible in "Nearby Devices" (so you can see who's
+around) but tapping one starts the Connect flow instead of opening a chat,
+until connected.
+
+**Threat model note:** this authenticates "the device I can currently reach
+at this IP, whose owner just tapped Accept" — the same trust level as
+Bluetooth's "Just Works"/numeric-comparison pairing. The verification code
+is there so a human can optionally catch an unexpected mismatch, but nothing
+is cryptographically bound to it (unlike a true PAKE). Intentionally simple
+for a v1 LAN app.
 
 ## 5. Transport Security
 
-Once paired, every TCP connection (chat AND transfer) is wrapped in a
-**Noise_XX**-authenticated encrypted channel using the stored keypairs. No plaintext
-ever hits the wire. This is deliberately simple crypto (one library, one pattern) —
-not rolling anything custom.
+Once connected (§4), every TCP connection (chat AND transfer control channel)
+is wrapped in AES-256-GCM using the session key derived at connect time.
+Every encrypted frame is `[12-byte nonce][ciphertext][16-byte tag]` — chosen
+to match Google Tink's AEAD subtle-primitive output byte-for-byte, so the
+Android (Tink) and desktop (Node's built-in `crypto`) implementations need
+zero translation logic between them. No plaintext ever hits the wire once
+connected. This used to use ChaCha20-Poly1305; that was switched to
+AES-256-GCM after finding it's not available in some Windows Electron
+builds' bundled OpenSSL ("Unknown cipher"). AES-GCM is mandated by TLS
+itself, so it's guaranteed present everywhere Node/Electron/Android run.
 
 ## 6. Chat Protocol (TCP, port 47111)
 

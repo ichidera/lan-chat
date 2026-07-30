@@ -7,7 +7,7 @@ const os = require('os');
 
 const { Discovery } = require('./core/discovery');
 const { TrustStore } = require('./core/trustStore');
-const { startPairing, deriveMatchingKey } = require('./core/pairing');
+const { ConnectServer, ConnectClient } = require('./core/pairing');
 const cryptoCore = require('./core/crypto');
 const { ChatNode } = require('./core/chat');
 const { TransferServer, TransferClient } = require('./core/transfer');
@@ -39,7 +39,8 @@ function loadOrCreateIdentity() {
 
 let mainWindow;
 let self;
-let discovery, trustStore, chat, transferServer, transferClient;
+let discovery, trustStore, chat, transferServer, transferClient, connectServer, connectClient;
+const pendingIncomingConnects = new Map(); // requestId -> respond(accept: boolean)
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -55,13 +56,16 @@ function createWindow() {
 
 app.whenReady().then(() => {
   const identity = loadOrCreateIdentity();
-  self = { ...identity, chatPort: 47111, transferPort: 47112 };
+  const publicKeyRaw = cryptoCore.exportPublicKeyRaw(identity.keyPair.publicKey).toString('hex');
+  self = { ...identity, chatPort: 47111, transferPort: 47112, connectPort: 47120, publicKeyRaw };
 
   trustStore = new TrustStore(path.join(APP_DIR, 'trust.json'));
 
   discovery = new Discovery(self);
-  discovery.on('peer:new', (peer) => mainWindow.webContents.send('peers:update', discovery.list()));
+  discovery.on('peer:new', () => mainWindow.webContents.send('peers:update', discovery.list()));
+  discovery.on('peer:update', () => mainWindow.webContents.send('peers:update', discovery.list()));
   discovery.on('peer:gone', () => mainWindow.webContents.send('peers:update', discovery.list()));
+  discovery.on('error', (err) => console.warn('[discovery]', err.message));
   discovery.start();
 
   chat = new ChatNode(self, trustStore);
@@ -75,6 +79,15 @@ app.whenReady().then(() => {
 
   transferClient = new TransferClient(self, trustStore);
 
+  connectServer = new ConnectServer(self, trustStore);
+  connectServer.on('incoming', (req) => {
+    const requestId = crypto.randomUUID();
+    pendingIncomingConnects.set(requestId, req.respond);
+    mainWindow.webContents.send('connect:incoming', { requestId, deviceId: req.deviceId, name: req.name, code: req.code });
+  });
+  connectServer.start();
+  connectClient = new ConnectClient(self, trustStore);
+
   createWindow();
 });
 
@@ -84,11 +97,35 @@ ipcMain.handle('self:get', () => ({ deviceId: self.deviceId, name: self.name }))
 ipcMain.handle('peers:list', () => discovery.list());
 ipcMain.handle('trust:list', () => trustStore.list());
 
-ipcMain.handle('pairing:start', () => startPairing(self));
-ipcMain.handle('pairing:complete', (_e, { deviceId, name, publicKeyRaw, pin }) => {
-  const sessionKey = deriveMatchingKey(self, publicKeyRaw, pin);
-  trustStore.addPaired(deviceId, name, Buffer.from(publicKeyRaw, 'hex'), sessionKey);
+ipcMain.handle('connect:initiate', async (_e, { peer }) => {
+  return connectClient.connect(peer, (code) => {
+    mainWindow.webContents.send('connect:waiting', { deviceId: peer.deviceId, code });
+  });
+});
+
+ipcMain.handle('connect:respond', (_e, { requestId, accept }) => {
+  const respond = pendingIncomingConnects.get(requestId);
+  if (respond) {
+    respond(accept);
+    pendingIncomingConnects.delete(requestId);
+  }
   return true;
+});
+
+ipcMain.handle('discovery:probeIp', (_e, { ip }) => {
+  discovery.probe(ip);
+  return true;
+});
+
+ipcMain.handle('network:selfAddresses', () => {
+  const addrs = [];
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) addrs.push(iface.address);
+    }
+  }
+  return addrs;
 });
 
 ipcMain.handle('chat:send', async (_e, { peer, body }) => {
@@ -117,5 +154,6 @@ app.on('window-all-closed', () => {
   discovery?.stop();
   chat?.stop();
   transferServer?.stop();
+  connectServer?.stop();
   if (process.platform !== 'darwin') app.quit();
 });

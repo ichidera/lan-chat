@@ -11,16 +11,17 @@
         android:layout_height="match_parent"
         android:padding="16dp">
 
-        <Button
-            android:id="@+id/pairButton"
+        <TextView
+            android:id="@+id/selfIpText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="+ Pair new device" />
+            android:textSize="12sp"
+            android:textColor="#888888"
+            android:layout_marginBottom="8dp" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:text="Nearby devices"
             android:textStyle="bold" />
 
@@ -30,6 +31,13 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:layout_marginTop="8dp" />
+
+        <Button
+            android:id="@+id/manualIpButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Can't find a device? Connect by IP" />
     </LinearLayout>
 
     <!-- Screen 2: chat -->

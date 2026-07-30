@@ -2,18 +2,27 @@
 body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; height: 100vh; color: #1a1a1a; }
 #app { display: flex; height: 100vh; }
 
-#sidebar { width: 260px; background: #f4f4f6; border-right: 1px solid #ddd; padding: 16px; display: flex; flex-direction: column; }
-#self-info { margin-bottom: 20px; }
-#self-name { font-weight: 600; margin-bottom: 8px; }
-#pair-btn, #send-btn, #complete-pairing-btn { background: #2d6cdf; color: white; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
-#pair-btn { width: 100%; }
-#close-pairing-btn { background: #eee; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; margin-left: 8px; }
+#sidebar { width: 260px; background: #f4f4f6; border-right: 1px solid #ddd; padding: 16px; display: flex; flex-direction: column; overflow-y: auto; }
+#self-info { margin-bottom: 16px; }
+#self-name { font-weight: 600; margin-bottom: 4px; }
+#self-ip { word-break: break-word; }
+
+button { background: #2d6cdf; color: white; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
+button.secondary { background: #eee; color: #333; }
 
 h3 { font-size: 12px; text-transform: uppercase; color: #888; margin: 8px 0; }
-#peer-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; }
+#peer-list { list-style: none; padding: 0; margin: 0; }
 .peer { padding: 8px 10px; border-radius: 6px; cursor: pointer; margin-bottom: 4px; font-size: 14px; }
 .peer.trusted:hover { background: #e2e9fb; }
 .peer.untrusted { color: #999; }
+.peer.active { background: #2d6cdf; color: white; }
+.peer.active:hover { background: #2d6cdf; }
+#empty-hint { font-size: 12px; color: #999; line-height: 1.4; margin-top: 8px; }
+
+#manual-connect { margin-top: 20px; padding-top: 16px; border-top: 1px solid #ddd; }
+#manual-connect .row { display: flex; gap: 6px; margin-bottom: 6px; }
+#manual-ip-input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; }
+#manual-ip-btn { padding: 6px 10px; font-size: 12px; }
 
 #main { flex: 1; display: flex; flex-direction: column; }
 #chat-header { padding: 14px 20px; border-bottom: 1px solid #eee; font-weight: 600; }
@@ -24,14 +33,17 @@ h3 { font-size: 12px; text-transform: uppercase; color: #888; margin: 8px 0; }
 
 #composer { display: flex; gap: 8px; padding: 14px 20px; border-top: 1px solid #eee; }
 #msg-input { flex: 1; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
-#file-btn { background: #eee; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+#file-btn { background: #eee; color: #333; }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; }
 .modal.hidden { display: none; }
 .modal-box { background: white; padding: 24px; border-radius: 10px; width: 380px; }
-#pairing-pin { font-size: 32px; letter-spacing: 6px; text-align: center; margin: 16px 0; font-weight: 700; }
-.hint { font-size: 12px; color: #888; }
-#their-device-json { width: 100%; padding: 8px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; }
+.modal-box .row { display: flex; gap: 8px; margin-top: 12px; }
+.modal-box .row button { flex: 1; }
+#waiting-code, #incoming-code { font-size: 32px; letter-spacing: 6px; text-align: center; margin: 12px 0; font-weight: 700; background: #f4f4f6; border-radius: 8px; padding: 8px; }
+.hint { font-size: 12px; color: #888; line-height: 1.4; }
+#cancel-waiting-btn { width: 100%; margin-top: 12px; background: #eee; color: #333; }
+#incoming-decline-btn { background: #eee; color: #333; }
 
 #transfer-toast { position: fixed; bottom: 20px; right: 20px; background: #222; color: white; padding: 12px 16px; border-radius: 8px; font-size: 13px; }
 #transfer-toast.hidden { display: none; }

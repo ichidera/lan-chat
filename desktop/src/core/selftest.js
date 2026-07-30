@@ -1,9 +1,10 @@
 'use strict';
 /**
  * Runs two simulated "devices" (Alice + Bob) in one process, on localhost,
- * to prove discovery -> pairing -> chat -> file transfer all work end to end.
- * Not a replacement for real multi-machine LAN testing, but catches every
- * logic bug before you ever touch Android Studio.
+ * to prove discovery -> connect (interactive accept) -> chat -> file
+ * transfer all work end to end. Not a replacement for real multi-machine
+ * LAN testing, but catches every logic bug before you ever touch a second
+ * machine or Android Studio.
  */
 const crypto = require('crypto');
 const fs = require('fs');
@@ -12,18 +13,21 @@ const os = require('os');
 
 const { Discovery } = require('./discovery');
 const { TrustStore } = require('./trustStore');
-const { startPairing, deriveMatchingKey } = require('./pairing');
+const { ConnectServer, ConnectClient } = require('./pairing');
 const cryptoCore = require('./crypto');
 const { ChatNode } = require('./chat');
 const { TransferServer, TransferClient } = require('./transfer');
 
 function makeSelf(name, basePort) {
+  const keyPair = cryptoCore.generateKeyPair();
   return {
     deviceId: crypto.randomUUID(),
     name,
-    keyPair: cryptoCore.generateKeyPair(),
+    keyPair,
+    publicKeyRaw: cryptoCore.exportPublicKeyRaw(keyPair.publicKey).toString('hex'),
     chatPort: basePort,
     transferPort: basePort + 10,
+    connectPort: basePort + 20,
   };
 }
 
@@ -39,35 +43,51 @@ async function main() {
   const aliceTrust = new TrustStore(path.join(tmpDir, 'alice-trust.json'));
   const bobTrust = new TrustStore(path.join(tmpDir, 'bob-trust.json'));
 
-  // 1) Pairing (simulating PIN exchange happening out of band, e.g. user reads screen)
-  const offerFromAlice = startPairing(alice);
-  const bobSessionKey = deriveMatchingKey(bob, offerFromAlice.publicKeyRaw, offerFromAlice.pin);
-  bobTrust.addPaired(alice.deviceId, alice.name, Buffer.from(offerFromAlice.publicKeyRaw, 'hex'), bobSessionKey);
+  // 0) AEAD sanity check on this machine's Node build — this is exactly what
+  // crashed for the reported "Unknown cipher" bug, so prove it up front.
+  const testKey = crypto.randomBytes(32);
+  const testFrame = cryptoCore.encrypt(testKey, Buffer.from('hello'));
+  const testPlain = cryptoCore.decrypt(testKey, testFrame);
+  console.assert(testPlain.toString() === 'hello', 'FAIL: AES-256-GCM round-trip broken');
+  console.log('[ok] crypto: AES-256-GCM encrypt/decrypt round-trip works on this Node build');
 
-  const bobPublicKeyRaw = cryptoCore.exportPublicKeyRaw(bob.keyPair.publicKey).toString('hex');
-  const aliceSessionKey = deriveMatchingKey(alice, bobPublicKeyRaw, offerFromAlice.pin);
-  aliceTrust.addPaired(bob.deviceId, bob.name, Buffer.from(bobPublicKeyRaw, 'hex'), aliceSessionKey);
-
-  console.assert(aliceSessionKey.equals(bobSessionKey), 'FAIL: session keys must match');
-  console.log('[ok] pairing: both sides derived identical session key');
-
-  // 2) Discovery (real UDP broadcast on loopback-capable network in this sandbox)
-  const aliceDisc = new Discovery({ deviceId: alice.deviceId, name: alice.name, chatPort: alice.chatPort, transferPort: alice.transferPort });
-  const bobDisc = new Discovery({ deviceId: bob.deviceId, name: bob.name, chatPort: bob.chatPort, transferPort: bob.transferPort });
+  // 1) Discovery (real UDP broadcast on loopback-capable network in this sandbox)
+  const aliceDisc = new Discovery({ deviceId: alice.deviceId, name: alice.name, chatPort: alice.chatPort, transferPort: alice.transferPort, connectPort: alice.connectPort, publicKeyRaw: alice.publicKeyRaw });
+  const bobDisc = new Discovery({ deviceId: bob.deviceId, name: bob.name, chatPort: bob.chatPort, transferPort: bob.transferPort, connectPort: bob.connectPort, publicKeyRaw: bob.publicKeyRaw });
   aliceDisc.start();
   bobDisc.start();
   await sleep(500);
   const bobSeenByAlice = aliceDisc.peers.get(bob.deviceId);
-  console.log(bobSeenByAlice
-    ? '[ok] discovery: Alice sees Bob via UDP broadcast'
+  const aliceSeenByBob = bobDisc.peers.get(alice.deviceId);
+  console.log(bobSeenByAlice && aliceSeenByBob
+    ? '[ok] discovery: Alice and Bob see each other via UDP broadcast (and/or the reply-on-new-peer handshake)'
     : '[skip] discovery: UDP broadcast blocked in this sandbox (expected in some containers) — continuing with manual peer info');
   aliceDisc.stop();
   bobDisc.stop();
 
-  // Fall back to manual peer objects for the rest of the test (mirrors what
-  // Discovery would have produced) so the rest of the pipeline is still proven.
-  const bobPeerForAlice = bobSeenByAlice || { deviceId: bob.deviceId, ip: '127.0.0.1', chatPort: bob.chatPort, transferPort: bob.transferPort };
-  const alicePeerForBob = { deviceId: alice.deviceId, ip: '127.0.0.1', chatPort: alice.chatPort, transferPort: alice.transferPort };
+  const bobPeerForAlice = bobSeenByAlice || { deviceId: bob.deviceId, name: bob.name, ip: '127.0.0.1', publicKeyRaw: bob.publicKeyRaw, chatPort: bob.chatPort, transferPort: bob.transferPort, connectPort: bob.connectPort };
+  const alicePeerForBob = { deviceId: alice.deviceId, name: alice.name, ip: '127.0.0.1', publicKeyRaw: alice.publicKeyRaw, chatPort: alice.chatPort, transferPort: alice.transferPort, connectPort: alice.connectPort };
+
+  // 2) Connect flow — real TCP over loopback, real interactive accept, no PIN.
+  const bobConnectServer = new ConnectServer(bob, bobTrust);
+  bobConnectServer.on('incoming', (req) => {
+    // Simulates Bob's human tapping "Accept" — in the real UI this happens
+    // after they visually compare the verification code.
+    req.respond(true);
+  });
+  bobConnectServer.start();
+  await sleep(100);
+
+  const aliceConnectClient = new ConnectClient(alice, aliceTrust);
+  let waitingCode = null;
+  const connectResult = await aliceConnectClient.connect(bobPeerForAlice, (code) => { waitingCode = code; });
+  console.assert(connectResult.status === 'accepted', `FAIL: connect status was ${connectResult.status}`);
+  console.assert(waitingCode === connectResult.code, 'FAIL: waiting code should match final code');
+  console.assert(aliceTrust.isPaired(bob.deviceId), 'FAIL: Alice should have Bob trusted after accept');
+  console.assert(bobTrust.isPaired(alice.deviceId), 'FAIL: Bob should have Alice trusted after accept');
+  console.assert(aliceTrust.sessionKeyFor(bob.deviceId).equals(bobTrust.sessionKeyFor(alice.deviceId)), 'FAIL: session keys must match');
+  console.log(`[ok] connect: interactive accept flow completed, both sides derived identical session key (verification code ${connectResult.code})`);
+  bobConnectServer.stop();
 
   // 3) Chat
   const aliceChat = new ChatNode(alice, aliceTrust);
@@ -97,7 +117,7 @@ async function main() {
   await sleep(200);
 
   const transferClient = new TransferClient(alice, aliceTrust);
-  const status = await transferClient.sendFiles(alicePeerForBob.deviceId ? bobPeerForAlice : bobPeerForAlice, [
+  const status = await transferClient.sendFiles(bobPeerForAlice, [
     { path: fakeApkPath, name: 'MyApp.apk', mime: 'application/vnd.android.package-archive', isApp: true, appLabel: 'My App', appPackage: 'com.example.myapp' },
   ]);
   console.assert(status === 'ok', `FAIL: transfer status was ${status}`);
