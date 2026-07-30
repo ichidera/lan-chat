@@ -7,10 +7,13 @@ contextBridge.exposeInMainWorld('lanchat', {
   listTrusted: () => ipcRenderer.invoke('trust:list'),
   getSelfAddresses: () => ipcRenderer.invoke('network:selfAddresses'),
 
-  generatePairingPin: () => ipcRenderer.invoke('pairing:generatePin'),
-  pairWithPeer: (peer, pin) => ipcRenderer.invoke('pairing:pair', { peer, pin }),
-  probeIp: (ip) => ipcRenderer.invoke('discovery:probeIp', { ip }),
+  // Connect flow: click to initiate, popup to accept — see pairing.js
+  initiateConnect: (peer) => ipcRenderer.invoke('connect:initiate', { peer }),
+  respondToConnect: (requestId, accept) => ipcRenderer.invoke('connect:respond', { requestId, accept }),
+  onIncomingConnect: (cb) => ipcRenderer.on('connect:incoming', (_e, data) => cb(data)),
+  onConnectWaiting: (cb) => ipcRenderer.on('connect:waiting', (_e, data) => cb(data)),
 
+  probeIp: (ip) => ipcRenderer.invoke('discovery:probeIp', { ip }),
 
   sendChat: (peer, body) => ipcRenderer.invoke('chat:send', { peer, body }),
   onChatMessage: (cb) => ipcRenderer.on('chat:message', (_e, data) => cb(data)),

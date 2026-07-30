@@ -18,20 +18,20 @@ import java.net.NetworkInterface
 
 /**
  * Deliberately simple, single-Activity UI: a device list, and a chat screen.
- * All the interesting logic lives in the core/ package's .kt files and LanChatForegroundService;
+ * All the interesting logic lives in core/*.kt and LanChatForegroundService;
  * this file just wires taps to those calls.
  *
- * Tapping a device in the list is the single entry point (mirrors the
- * desktop renderer): if it's not paired yet, this opens the pairing dialog
- * for that specific device; if it is paired, tapping toggles its chat screen
- * open/closed.
-
+ * Connect flow (mirrors desktop, Bluetooth-style): tapping an unpaired
+ * device confirms "Connect to X?", then shows a waiting dialog with a
+ * verification code while the other device shows an Accept/Decline popup
+ * with the same code. Tapping an already-paired device toggles its chat.
  */
 class MainActivity : AppCompatActivity() {
 
     private var service: LanChatForegroundService? = null
     private var activePeer: PeerInfo? = null
     private var peersSnapshot: List<PeerInfo> = emptyList()
+    private var waitingDialog: AlertDialog? = null
 
     private lateinit var peerListView: ListView
     private lateinit var chatContainer: LinearLayout
@@ -123,8 +123,7 @@ class MainActivity : AppCompatActivity() {
             val kind = if (p.kind == "desktop") "\uD83D\uDCBB" else "\uD83D\uDCF1"
             val trusted = trustStore.isPaired(p.deviceId)
             "$kind ${p.name}" + when {
-                !trusted -> " — tap to pair"
-
+                !trusted -> " — tap to connect"
                 activePeer?.deviceId == p.deviceId -> " (open)"
                 else -> ""
             }
@@ -138,18 +137,79 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Single entry point for tapping a device: pair if needed, otherwise toggle its chat open/closed. */
     private fun togglePeer(peer: PeerInfo, trustStore: TrustStore) {
         if (!trustStore.isPaired(peer.deviceId)) {
-            showPairingDialog(peer)
+            confirmAndConnect(peer)
             return
         }
         if (activePeer?.deviceId == peer.deviceId) {
-            showPeerList() // tapping the already-open conversation again closes it
-
+            showPeerList()
         } else {
             openChat(peer)
         }
+    }
+
+    /** Initiating side of the Connect flow. */
+    private fun confirmAndConnect(peer: PeerInfo) {
+        AlertDialog.Builder(this)
+            .setTitle("Connect to ${peer.name}?")
+            .setPositiveButton("Connect") { _, _ -> startConnect(peer) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun startConnect(peer: PeerInfo) {
+        val builder = AlertDialog.Builder(this)
+            .setTitle("Connecting to ${peer.name}…")
+            .setMessage("Waiting for them to accept on their device.\n\nCode: ------")
+            .setNegativeButton("Cancel", null)
+            .setCancelable(false)
+        waitingDialog = builder.show()
+
+        lifecycleScope.launch {
+            try {
+                val result = service?.connectClient?.connect(peer) { code ->
+                    waitingDialog?.setMessage("Waiting for them to accept on their device.\n\nCode: $code")
+                }
+                waitingDialog?.dismiss()
+                when (result?.status) {
+                    "accepted" -> { refreshPeerList(); openChat(peer) }
+                    "rejected" -> Toast.makeText(this@MainActivity, "${peer.name} declined the connection.", Toast.LENGTH_LONG).show()
+                    "timeout" -> Toast.makeText(this@MainActivity, "${peer.name} didn't respond in time.", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                waitingDialog?.dismiss()
+                AlertDialog.Builder(this@MainActivity).setTitle("Couldn't connect").setMessage(e.message).setPositiveButton("OK", null).show()
+            }
+        }
+    }
+
+    /** Receiving side of the Connect flow. */
+    private fun showIncomingConnectDialog(req: IncomingConnectRequest) {
+        AlertDialog.Builder(this)
+            .setTitle("Connection request")
+            .setMessage("${req.name} wants to connect.\n\nCode: ${req.code}\n\nIf this matches their screen, it's genuinely them.")
+            .setPositiveButton("Accept") { _, _ -> req.respond(true); refreshPeerList() }
+            .setNegativeButton("Decline") { _, _ -> req.respond(false) }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun probeManualIp() {
+        val input = EditText(this).apply { hint = "Their IP address" }
+        AlertDialog.Builder(this)
+            .setTitle("Connect by IP")
+            .setMessage("Ask them for their IP (shown above their own device list).")
+            .setView(input)
+            .setPositiveButton("Try") { _, _ ->
+                val ip = input.text.toString().trim()
+                if (ip.isNotEmpty()) {
+                    service?.discovery?.probe(ip)
+                    Toast.makeText(this, "Probing $ip — it should appear in Nearby devices shortly if reachable.", Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun openChat(peer: PeerInfo) {
@@ -201,45 +261,6 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this@MainActivity, "Sent ${entry.label}: $status", Toast.LENGTH_SHORT).show()
                 }
             }
-            .show()
-    }
-
-    /**
-     * Pairing dialog, tied to one specific peer. Only a PIN needs to be
-     * agreed on — see Pairing.kt / PROTOCOL.md §4 for why nothing else does.
-     */
-    private fun showPairingDialog(peer: PeerInfo) {
-        val identity = IdentityStore.loadOrCreate(this)
-        val generatedPin = Pairing.generatePin()
-
-        val view = layoutInflater.inflate(R.layout.dialog_pairing, null)
-        view.findViewById<TextView>(R.id.pairingPin).text = generatedPin
-        val pinInput = view.findViewById<EditText>(R.id.theirCodeInput).apply {
-            hint = "Or enter the PIN they gave you"
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Pair with ${'$'}{peer.name}")
-            .setMessage("Tell them this PIN, or enter the one they told you, then tap Pair.")
-            .setView(view)
-            .setPositiveButton("Pair") { _, _ ->
-                val typedPin = pinInput.text.toString().trim()
-                val pin = if (typedPin.isNotEmpty()) typedPin else generatedPin
-                // Re-read the live peer so we have its freshest publicKeyRaw.
-                val livePeer = peersSnapshot.find { it.deviceId == peer.deviceId } ?: peer
-                try {
-                    Pairing.pairWithPeer(identity, livePeer, pin, TrustStore(this))
-                    Toast.makeText(this, "Paired with ${'$'}{livePeer.name}", Toast.LENGTH_SHORT).show()
-                    openChat(livePeer)
-                } catch (e: Exception) {
-                    AlertDialog.Builder(this)
-                        .setTitle("Couldn't pair")
-                        .setMessage(e.message)
-                        .setPositiveButton("OK", null)
-                        .show()
-                }
-            }
-            .setNegativeButton("Cancel", null)
             .show()
     }
 

@@ -123,6 +123,7 @@ class Discovery extends EventEmitter {
       kind: 'desktop',
       chatPort: this.self.chatPort,
       transferPort: this.self.transferPort,
+      connectPort: this.self.connectPort,
       publicKeyRaw: this.self.publicKeyRaw, // public keys are not secret — broadcasting them is what lets pairing skip manual copy/paste
       version: 1,
       ts: Date.now(),
@@ -152,8 +153,6 @@ class Discovery extends EventEmitter {
    */
   probe(ip) {
     this._sendTo(ip, DISCOVERY_PORT);
-  }
-
   }
 
   _sweepStalePeers() {

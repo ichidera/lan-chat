@@ -33,8 +33,7 @@ class LanChatForegroundService : Service() {
         super.onCreate()
         identity = IdentityStore.loadOrCreate(this)
         trustStore = TrustStore(this)
-        val self = SelfInfo(identity.deviceId, identity.name, chatPort = 47111, transferPort = 47112, publicKeyRaw = identity.publicKeyHex)
-
+        val self = SelfInfo(identity.deviceId, identity.name, chatPort = 47111, transferPort = 47112, connectPort = 47120, publicKeyRaw = identity.publicKeyHex)
 
         discovery = Discovery(this, self).also { it.start() }
         chatNode = ChatNode(self, trustStore).also { it.start() }
