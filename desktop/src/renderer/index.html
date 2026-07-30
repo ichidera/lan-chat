@@ -11,11 +11,11 @@
       <div id="self-info">
         <div id="self-name">—</div>
         <div id="self-ip" class="hint"></div>
+
       </div>
       <h3>Nearby devices</h3>
       <ul id="peer-list"></ul>
       <p id="empty-hint" class="hint hidden">No devices found yet. Make sure the other device is on the same Wi-Fi/LAN and its app is open — this can take a few seconds.</p>
-
       <div id="manual-connect">
         <h3>Can't find a device?</h3>
         <div class="row">
@@ -27,7 +27,8 @@
     </aside>
 
     <main id="main">
-      <div id="chat-header">Click a device on the left to connect, or to chat</div>
+      <div id="chat-header">Click a device on the left to chat, or to pair with it</div>
+
       <div id="messages"></div>
       <div id="composer">
         <input id="msg-input" placeholder="Type a message..." disabled />
@@ -40,25 +41,20 @@
   <!-- Shown on the initiating side while waiting for the other device to accept -->
   <div id="waiting-modal" class="modal hidden">
     <div class="modal-box">
-      <h3 id="waiting-title">Connecting…</h3>
-      <p class="hint">Waiting for them to accept on their device.</p>
-      <p class="hint">If both screens show the same code below, it's genuinely them:</p>
-      <div id="waiting-code">------</div>
-      <button id="cancel-waiting-btn">Cancel</button>
-    </div>
-  </div>
+      <h3 id="pairing-title">Pair with device</h3>
+      <p class="hint">Pairing needs one thing: <strong>the same 6-digit PIN entered on both devices.</strong> Everything else (device identity, keys) is already exchanged automatically.</p>
 
-  <!-- Shown on the receiving side when someone else initiates a connect -->
-  <div id="incoming-modal" class="modal hidden">
-    <div class="modal-box">
-      <h3 id="incoming-title">Connection request</h3>
-      <p id="incoming-body" class="hint"></p>
-      <p class="hint">If this code matches what's on their screen, it's genuinely them:</p>
-      <div id="incoming-code">------</div>
-      <div class="row">
-        <button id="incoming-accept-btn">Accept</button>
-        <button id="incoming-decline-btn">Decline</button>
-      </div>
+      <p>Option A — you tell them a PIN:</p>
+      <div id="pairing-pin">------</div>
+      <p class="hint">Say/send this number to the person on the other device, then have them type it into their own pairing dialog for you.</p>
+
+      <p>Option B — they told you a PIN:</p>
+      <input id="pin-input" placeholder="Enter the 6-digit PIN" maxlength="6" inputmode="numeric" />
+
+      <button id="complete-pairing-btn">Pair using this PIN</button>
+      <button id="close-pairing-btn">Cancel</button>
+      <p id="pairing-error" class="error hidden"></p>
+
     </div>
   </div>
 

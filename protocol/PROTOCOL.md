@@ -31,6 +31,7 @@ Identity is NOT tied to a phone number, email, or account. It's tied to the devi
 Every device broadcasts a UDP packet every 3 seconds, using **four layers**
 so it's reachable regardless of how a given machine's networking is set up:
 
+
 1. Global broadcast to `255.255.255.255:47110`.
 2. The subnet broadcast address computed per active network interface (e.g.
    `192.168.1.255` for a `192.168.1.0/24` Wi-Fi adapter) — this is the layer
@@ -54,6 +55,7 @@ packet straight to it (see `Discovery.probe()`), bypassing broadcast and
 multicast entirely. Combined with layer 4 above, one working direction of
 reachability is enough for both devices to discover each other.
 
+
 Losing any one layer still leaves the others — this is intentionally
 redundant rather than betting on "the one correct" method.
 
@@ -67,16 +69,16 @@ Packet shape:
   "kind": "android",         // "android" | "desktop"
   "chatPort": 47111,
   "transferPort": 47112,
-  "connectPort": 47120,
-  "publicKeyRaw": "9f2a...", // hex-encoded X25519 public key — see §4, this is what makes pairing a single tap+accept
+  "publicKeyRaw": "9f2a...", // hex-encoded X25519 public key — see §4, this is what makes pairing PIN-only
+
   "version": 1,
   "ts": 1732550000
 }
 ```
 
 Public keys are not secret, so broadcasting one in every presence packet is
-safe — it's what lets the Connect flow (§4) skip exchanging anything at all
-beyond a visible "does this code match?" check.
+safe — it's what lets pairing (§4) skip exchanging anything but a PIN.
+
 
 Receivers keep a live table of peers, keyed by `deviceId`, and expire any peer not
 heard from in 12 seconds (handles someone walking out of Wi-Fi range or closing the app;
@@ -88,36 +90,36 @@ multicast group on the same socket to receive layer 3 announces too.
 
 ## 4. Connect (trust, not accounts)
 
-Before two devices can exchange chat messages or files, they must connect
-once — a Bluetooth-style request/accept flow, not a PIN to type in:
+Before two devices can exchange chat messages or files, they must pair once.
+Because public keys already travel automatically in every presence packet
+(§3), pairing is reduced to the one thing that genuinely needs a human:
+**agreeing on the same 6-digit PIN.**
 
-1. Person A taps Bob's entry in "Nearby devices," confirms "Connect to Bob's
-   Phone?", which opens a TCP connection to Bob on port 47120 and sends a
-   `connect_request` containing Alice's identity + public key.
-2. Alice's screen immediately shows "Waiting for Bob to accept…" along with
-   a 6-digit verification code computed from *both* public keys (which she
-   already has: her own, plus Bob's from his presence broadcast).
-3. Bob's device (always listening via `ConnectServer`) receives the request
-   and shows a popup: "Ada's Laptop wants to connect. Code: 483920 — does
-   this match their screen? [Accept] [Decline]" — Bob computes the exact
-   same code independently, since he now has both public keys too.
-4. If Bob accepts, both sides derive a session key from pure ECDH (their own
-   private key + the other's public key — see `deriveConnectSessionKey` in
-   `crypto.js`/`CryptoUtil.kt`) and store the pairing. Alice's "waiting"
-   screen resolves and opens the chat automatically.
-5. If Bob declines, or doesn't respond within 20 seconds, Alice sees that
-   instead and nothing is stored on either side.
+1. Person A clicks Bob's entry in "Nearby devices." Since they're not paired
+   yet, this opens a pairing dialog showing a freshly generated PIN.
+2. Person A tells Bob that PIN (out loud, over text, however — this is the
+   one out-of-band step).
+3. Bob clicks Alice's entry on his device. His pairing dialog also generates
+   its own PIN by default, but he overwrites it with the PIN Alice gave him.
+4. Both sides derive a session key from `(their own private key, the peer's
+   already-known public key, the shared PIN)` — see `deriveSessionKey` in
+   `crypto.js`/`CryptoUtil.kt`. This is a pure local computation; nothing is
+   sent back and forth to "confirm" a match. If both people used the same
+   PIN, every future encrypted message between them decrypts correctly. If
+   they used different PINs, decryption fails loudly (AEAD authentication
+   failure) rather than silently producing garbage — so a mismatched PIN is
+   very obvious the first time you try to chat, not a subtle bug.
+5. Each side stores the peer's `deviceId` + `publicKeyRaw` + derived session
+   key in a local "trusted peers" store. No PIN needed again after this.
 
 Untrusted peers are visible in "Nearby Devices" (so you can see who's
-around) but tapping one starts the Connect flow instead of opening a chat,
-until connected.
+around) but clicking one opens the pairing dialog instead of a chat, until
+paired.
 
-**Threat model note:** this authenticates "the device I can currently reach
-at this IP, whose owner just tapped Accept" — the same trust level as
-Bluetooth's "Just Works"/numeric-comparison pairing. The verification code
-is there so a human can optionally catch an unexpected mismatch, but nothing
-is cryptographically bound to it (unlike a true PAKE). Intentionally simple
-for a v1 LAN app.
+**Threat model note:** this is a PIN-salted ECDH, not a full PAKE (e.g.
+SPAKE2). It stops a passive network observer who didn't see the PIN. It's
+intentionally simple for a v1 LAN app.
+
 
 ## 5. Transport Security
 

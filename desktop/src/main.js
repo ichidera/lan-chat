@@ -7,7 +7,8 @@ const os = require('os');
 
 const { Discovery } = require('./core/discovery');
 const { TrustStore } = require('./core/trustStore');
-const { ConnectServer, ConnectClient } = require('./core/pairing');
+const { generatePin, pairWithPeer } = require('./core/pairing');
+
 const cryptoCore = require('./core/crypto');
 const { ChatNode } = require('./core/chat');
 const { TransferServer, TransferClient } = require('./core/transfer');
@@ -57,7 +58,8 @@ function createWindow() {
 app.whenReady().then(() => {
   const identity = loadOrCreateIdentity();
   const publicKeyRaw = cryptoCore.exportPublicKeyRaw(identity.keyPair.publicKey).toString('hex');
-  self = { ...identity, chatPort: 47111, transferPort: 47112, connectPort: 47120, publicKeyRaw };
+  self = { ...identity, chatPort: 47111, transferPort: 47112, publicKeyRaw };
+
 
   trustStore = new TrustStore(path.join(APP_DIR, 'trust.json'));
 
@@ -97,18 +99,12 @@ ipcMain.handle('self:get', () => ({ deviceId: self.deviceId, name: self.name }))
 ipcMain.handle('peers:list', () => discovery.list());
 ipcMain.handle('trust:list', () => trustStore.list());
 
-ipcMain.handle('connect:initiate', async (_e, { peer }) => {
-  return connectClient.connect(peer, (code) => {
-    mainWindow.webContents.send('connect:waiting', { deviceId: peer.deviceId, code });
-  });
+ipcMain.handle('pairing:generatePin', () => generatePin());
+ipcMain.handle('pairing:pair', (_e, { peer, pin }) => {
+  pairWithPeer(self, peer, pin, trustStore); // throws with a friendly message on bad PIN / missing pubkey — renderer shows it
+  return true;
 });
 
-ipcMain.handle('connect:respond', (_e, { requestId, accept }) => {
-  const respond = pendingIncomingConnects.get(requestId);
-  if (respond) {
-    respond(accept);
-    pendingIncomingConnects.delete(requestId);
-  }
   return true;
 });
 

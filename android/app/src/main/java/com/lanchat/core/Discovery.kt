@@ -5,9 +5,10 @@ import android.net.wifi.WifiManager
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.net.DatagramPacket
-import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.MulticastSocket
+
 import java.net.NetworkInterface
 
 const val DISCOVERY_PORT = 47110
@@ -17,7 +18,8 @@ private const val ANNOUNCE_INTERVAL_MS = 3000L
 private const val PEER_TIMEOUT_MS = 12000L // 4x announce interval, same reasoning as desktop
 private const val SWEEP_INTERVAL_MS = 2000L
 
-data class SelfInfo(val deviceId: String, val name: String, val chatPort: Int, val transferPort: Int, val connectPort: Int, val publicKeyRaw: String)
+data class SelfInfo(val deviceId: String, val name: String, val chatPort: Int, val transferPort: Int, val publicKeyRaw: String)
+
 
 data class PeerInfo(
     val deviceId: String,
@@ -26,19 +28,22 @@ data class PeerInfo(
     val ip: String,
     val chatPort: Int,
     val transferPort: Int,
-    val connectPort: Int,
     val publicKeyRaw: String?,
     var lastSeen: Long,
 )
 
 /**
  * Counterpart to desktop/src/core/discovery.js. Same JSON shape, same
- * multi-layer broadcast strategy, and the same reply-on-new-peer unicast
- * handshake (fixes asymmetric broadcast reachability — see that file's
- * header comment for the full reasoning).
+ * multi-layer broadcast strategy (see that file's header comment for why):
+ * global broadcast + per-interface subnet broadcast + multicast fallback.
+ * A desktop Discovery instance and this one will see each other with zero
+ * special-casing.
+ * The same reply-on-new-peer unicast handshake is used (fixes asymmetric
+ * broadcast reachability — see that file's header comment for the full reasoning).
+
  */
 class Discovery(private val context: Context, private val self: SelfInfo) {
-    private var socket: DatagramSocket? = null
+    private var socket: MulticastSocket? = null
     private var multicastLock: WifiManager.MulticastLock? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val _peers = mutableMapOf<String, PeerInfo>()
@@ -69,7 +74,7 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
             acquire()
         }
 
-        socket = DatagramSocket(null).apply {
+        socket = MulticastSocket(null).apply {
             reuseAddress = true
             bind(InetSocketAddress(DISCOVERY_PORT))
             broadcast = true
@@ -99,7 +104,6 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
         put("kind", "android")
         put("chatPort", self.chatPort)
         put("transferPort", self.transferPort)
-        put("connectPort", self.connectPort)
         put("publicKeyRaw", self.publicKeyRaw)
         put("version", 1)
         put("ts", System.currentTimeMillis())
@@ -115,8 +119,16 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
     }
 
     private fun announceOnce() {
+        val payload = presencePayload()
         val targets = (listOf(GLOBAL_BROADCAST_ADDR, MULTICAST_ADDR) + interfaceBroadcastAddresses()).distinct()
-        for (addr in targets) sendTo(addr)
+        for (addr in targets) {
+            try {
+                val packet = DatagramPacket(payload, payload.size, InetAddress.getByName(addr), DISCOVERY_PORT)
+                socket?.send(packet)
+            } catch (_: Exception) {
+                // one target failing (interface just went down, etc.) is expected occasionally — other layers cover it
+            }
+        }
     }
 
     /**
@@ -127,6 +139,8 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
      */
     fun probe(ip: String) {
         sendTo(ip, DISCOVERY_PORT)
+    }
+
     }
 
     private suspend fun listenLoop() {
@@ -148,7 +162,6 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
                     ip = packet.address.hostAddress ?: continue,
                     chatPort = json.getInt("chatPort"),
                     transferPort = json.getInt("transferPort"),
-                    connectPort = json.optInt("connectPort", 47120),
                     publicKeyRaw = json.optString("publicKeyRaw", null),
                     lastSeen = System.currentTimeMillis(),
                 )
