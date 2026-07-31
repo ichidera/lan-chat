@@ -5,9 +5,9 @@ import android.net.wifi.WifiManager
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.net.DatagramPacket
-import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.MulticastSocket
 import java.net.NetworkInterface
 
 const val DISCOVERY_PORT = 47110
@@ -38,7 +38,7 @@ data class PeerInfo(
  * header comment for the full reasoning).
  */
 class Discovery(private val context: Context, private val self: SelfInfo) {
-    private var socket: DatagramSocket? = null
+    private var socket: MulticastSocket? = null
     private var multicastLock: WifiManager.MulticastLock? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val _peers = mutableMapOf<String, PeerInfo>()
@@ -69,7 +69,7 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
             acquire()
         }
 
-        socket = DatagramSocket(null).apply {
+        socket = MulticastSocket(null).apply {
             reuseAddress = true
             bind(InetSocketAddress(DISCOVERY_PORT))
             broadcast = true
@@ -86,7 +86,7 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
     }
 
     private suspend fun announceLoop() {
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             announceOnce()
             delay(ANNOUNCE_INTERVAL_MS)
         }
@@ -131,7 +131,7 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
 
     private suspend fun listenLoop() {
         val buf = ByteArray(2048)
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             try {
                 val packet = DatagramPacket(buf, buf.size)
                 socket?.receive(packet)
@@ -159,13 +159,13 @@ class Discovery(private val context: Context, private val self: SelfInfo) {
                 // broadcast cycle. Fixes asymmetric broadcast reachability.
                 if (isNew) sendTo(packet.address.hostAddress ?: continue, packet.port)
             } catch (_: Exception) {
-                if (!isActive) break
+                if (!currentCoroutineContext().isActive) break
             }
         }
     }
 
     private suspend fun sweepLoop() {
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             delay(SWEEP_INTERVAL_MS)
             val now = System.currentTimeMillis()
             val before = _peers.size

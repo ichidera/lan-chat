@@ -18,7 +18,7 @@ import java.net.NetworkInterface
 
 /**
  * Deliberately simple, single-Activity UI: a device list, and a chat screen.
- * All the interesting logic lives in core/*.kt and LanChatForegroundService;
+ * All the interesting logic lives in the core/ package's .kt files and LanChatForegroundService;
  * this file just wires taps to those calls.
  *
  * Connect flow (mirrors desktop, Bluetooth-style): tapping an unpaired
